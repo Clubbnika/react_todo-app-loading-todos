@@ -6,11 +6,14 @@ import { USER_ID } from './api/todos';
 import { getTodos } from './api/todos';
 import { Todo } from './types/Todo';
 import classNames from 'classnames';
+import * as postService from './api/todos';
 
 export const App: React.FC = () => {
   const [data, setData] = useState<Todo[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [filter, setFilter] = useState<'All' | 'Active' | 'Completed'>('All');
+  const [newTodoTitle, setNewTodoTitle] = useState<string>('');
+  const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
 
   useEffect(() => {
     setErrorMessage(null);
@@ -43,6 +46,87 @@ export const App: React.FC = () => {
     return <UserWarning />;
   }
 
+  function createTodo() {
+    if (newTodoTitle.trim() === '') {
+      setErrorMessage('Title should not be empty');
+
+      return;
+    }
+
+    const newTodoData = {
+      userId: USER_ID,
+      title: newTodoTitle.trim(),
+      completed: false,
+    };
+
+    setIsSubmitting(true);
+    postService.createTodo(newTodoData)
+      .then(newTodo => {
+        setData(currentTodos => [...currentTodos, newTodo]);
+        setNewTodoTitle('');
+      })
+      .catch(() => {
+        setErrorMessage('Unable to add a todo');
+      })
+      .finally(() => {
+        setIsSubmitting(false);
+      });
+  }
+
+  function deleteTodo(id: number) {
+    setLoading(true);
+
+    postService.deleteTodo(id)
+      .then(() => {
+        setData(currentTodos => currentTodos.filter(todo => todo.id !== id));
+      })
+      .catch(() => {
+        setErrorMessage('Unable to delete a todo');
+      })
+      .finally(() => {
+        setLoading(false);
+      });
+  }
+
+  function deleteCompletedTodos() {
+    const completedTodos = data.filter(todo => todo.completed);
+
+    const completedIds = completedTodos.map(todo => todo.id);
+
+    const deletePromises = completedIds.map(id =>
+      postService.deleteTodo(id).then(() => id),
+    );
+
+    Promise.allSettled(deletePromises)
+      .then(results => {
+        const successIds = results
+          .filter(result => result.status === 'fulfilled')
+          .map(result => result.value);
+
+        const isSomeFailed = results.some(
+          result => result.status === 'rejected',
+        );
+
+        if (isSomeFailed) {
+          setErrorMessage('Unable to delete a todo');
+        }
+
+        setData(currentTodos => currentTodos.filter(
+          todo => !successIds.includes(todo.id)
+        ));
+      })
+      .catch(() => {
+        setErrorMessage('Unable to delete completed todos');
+      })
+      .finally(() => {
+        const inputField = document.querySelector(
+          '.todoapp__new-todo') as HTMLInputElement;
+        if (inputField) {
+          inputField.focus();
+        }
+      });
+  }
+
   return (
     <div className="todoapp">
       <h1 className="todoapp__title">todos</h1>
@@ -65,6 +149,15 @@ export const App: React.FC = () => {
             type="text"
             className="todoapp__new-todo"
             placeholder="What needs to be done?"
+            value={newTodoTitle}
+            onChange={(e) => setNewTodoTitle(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                e.preventDefault();
+                createTodo();
+              }
+            }}
+            disabled={isSubmitting}
           />
         </header>
 
@@ -95,6 +188,7 @@ export const App: React.FC = () => {
                   type="button"
                   className="todo__remove"
                   data-cy="TodoDelete"
+                  onClick={() => deleteTodo(todo.id)}
                 >
                   ×
                 </button>
@@ -154,6 +248,8 @@ export const App: React.FC = () => {
               className="todoapp__clear-completed"
               data-cy="ClearCompletedButton"
               disabled={data.filter(todo => todo.completed).length === 0}
+              onClick={deleteCompletedTodos}
+
             >
               Clear completed
             </button>
